@@ -1655,7 +1655,7 @@ export async function updateSiteConfig({
         target: siteConfig.key,
         set: { value, updatedAt: new Date() },
       });
-    revalidateTag("site-config");
+    revalidateTag("site-config", "default");
   } catch (_error) {
     throw new ChatSDKError(
       "bad_request:database",

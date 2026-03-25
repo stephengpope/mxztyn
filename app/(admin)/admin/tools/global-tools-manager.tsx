@@ -59,7 +59,7 @@ const SortableToolCard = ({
   return (
     <div ref={setNodeRef} style={style}>
       <AgentToolCard
-        dragHandleProps={{ attributes, listeners }}
+        dragHandleProps={{ attributes: attributes as unknown as Record<string, unknown>, listeners: listeners as unknown as Record<string, unknown> }}
         onDelete={onDelete}
         onEdit={onEdit}
         onToggleEnabled={onToggleEnabled}

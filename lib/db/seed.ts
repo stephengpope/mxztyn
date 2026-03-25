@@ -1,4 +1,5 @@
 import { config } from "dotenv";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { genSaltSync, hashSync } from "bcrypt-ts";
@@ -13,6 +14,12 @@ function hashPassword(password: string) {
 }
 
 async function createStripeProducts(stripe: Stripe) {
+  const existing = await stripe.products.list({ active: true, limit: 100 });
+  if (existing.data.length > 0) {
+    console.log("⏭️  Stripe products already exist, skipping");
+    return;
+  }
+
   console.log("Creating Stripe products and prices...");
 
   const baseProduct = await stripe.products.create({
@@ -69,48 +76,62 @@ async function createStripeProducts(stripe: Stripe) {
 
 async function seed() {
   if (!process.env.POSTGRES_URL) {
-    console.error("POSTGRES_URL is not set. Run pnpm db:setup first.");
-    process.exit(1);
+    console.log("⏭️  POSTGRES_URL not defined, skipping seed");
+    process.exit(0);
   }
 
   const connection = postgres(process.env.POSTGRES_URL, { max: 1 });
   const db = drizzle(connection);
 
-  // 1. Create default admin user
+  // 1. Create default admin user (if not exists)
   const email = "test@test.com";
   const password = "admin123";
 
-  console.log("Creating default admin user...");
-  await db.insert(user).values({
-    email,
-    password: hashPassword(password),
-    role: "admin",
-  });
-  console.log(`  Email: ${email}`);
-  console.log(`  Password: ${password}`);
+  const existingUsers = await db
+    .select()
+    .from(user)
+    .where(eq(user.email, email));
 
-  // 2. Create default agent
-  console.log("Creating default agent...");
-  await db.insert(agent).values({
-    name: "General Assistant",
-    description: "A helpful general-purpose AI assistant.",
-    systemPrompt:
-      "You are a helpful AI assistant. Answer questions clearly and concisely. Be friendly and professional.",
-    suggestions: [
-      "What can you help me with?",
-      "Tell me about yourself",
-      "Help me brainstorm ideas",
-    ],
-    isPublished: true,
-    isDefault: true,
-    order: 0,
-    documentToolsEnabled: false,
-    fileUploadEnabled: false,
-  });
-  console.log("  Created General Assistant (default)");
+  if (existingUsers.length === 0) {
+    console.log("Creating default admin user...");
+    await db.insert(user).values({
+      email,
+      password: hashPassword(password),
+      role: "admin",
+    });
+    console.log(`  Email: ${email}`);
+    console.log(`  Password: ${password}`);
+  } else {
+    console.log("⏭️  Default admin user already exists, skipping");
+  }
+
+  // 2. Create default agent (if none exist)
+  const existingAgents = await db.select().from(agent);
+
+  if (existingAgents.length === 0) {
+    console.log("Creating default agent...");
+    await db.insert(agent).values({
+      name: "General Assistant",
+      description: "A helpful general-purpose AI assistant.",
+      systemPrompt:
+        "You are a helpful AI assistant. Answer questions clearly and concisely. Be friendly and professional.",
+      suggestions: [
+        "What can you help me with?",
+        "Tell me about yourself",
+        "Help me brainstorm ideas",
+      ],
+      isPublished: true,
+      isDefault: true,
+      order: 0,
+      documentToolsEnabled: false,
+      fileUploadEnabled: false,
+    });
+    console.log("  Created General Assistant (default)");
+  } else {
+    console.log("⏭️  Agents already exist, skipping");
+  }
 
   // 3. Set default site name
-  console.log("Setting default site config...");
   await db
     .insert(siteConfig)
     .values({
@@ -118,7 +139,6 @@ async function seed() {
       value: "AI Chatbot",
     })
     .onConflictDoNothing();
-  console.log("  Site name: AI Chatbot");
 
   // 4. Create Stripe products (if Stripe is configured)
   if (process.env.STRIPE_SECRET_KEY) {
@@ -126,17 +146,17 @@ async function seed() {
     await createStripeProducts(stripe);
   } else {
     console.log(
-      "Skipping Stripe products (STRIPE_SECRET_KEY not set). Run again after configuring Stripe."
+      "⏭️  STRIPE_SECRET_KEY not set, skipping Stripe products"
     );
   }
 
   await connection.end();
-  console.log("\nSeed completed!");
+  console.log("✅ Seed completed!");
 }
 
 seed()
   .catch((error) => {
-    console.error("Seed failed:", error);
+    console.error("❌ Seed failed:", error);
     process.exit(1);
   })
   .finally(() => {
